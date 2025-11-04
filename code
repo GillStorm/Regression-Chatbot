@@ -1,0 +1,225 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import random
+import re
+
+class NeuralNet(nn.Module):
+    def __init__(self, input_size, hidden_size, num_classes):
+        super(NeuralNet, self).__init__()
+        self.l1 = nn.Linear(input_size, hidden_size) 
+        self.l2 = nn.Linear(hidden_size, hidden_size) 
+        self.l3 = nn.Linear(hidden_size, num_classes)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        out = self.l1(x)
+        out = self.relu(out)
+        out = self.l2(out)
+        out = self.relu(out)
+        out = self.l3(out)
+        return out
+
+class MiniChatbot:
+    def __init__(self):
+        # Simple training data
+        self.intents = {
+            "greeting": {
+                "patterns": ["hello", "hi", "hey", "good morning", "good afternoon"],
+                "responses": ["Hello! How can I help you?", "Hi there!", "Hey! What's up?", "Hello! Nice to meet you!"]
+            },
+            "goodbye": {
+                "patterns": ["bye", "goodbye", "see you", "farewell", "take care"],
+                "responses": ["Goodbye! Have a great day!", "See you later!", "Take care!", "Bye! Come back soon!"]
+            },
+            "thanks": {
+                "patterns": ["thank you", "thanks", "appreciate it", "thx"],
+                "responses": ["You're welcome!", "My pleasure!", "Happy to help!", "No problem!"]
+            },
+            "weather": {
+                "patterns": ["weather", "sunny", "rainy", "cloudy", "temperature"],
+                "responses": ["I don't have weather data, but I hope it's nice!", "Weather is unpredictable, isn't it?", "I wish I could check the weather for you!"]
+            },
+            "name": {
+                "patterns": ["what is your name", "who are you", "your name", "what should I call you"],
+                "responses": ["I'm ChatBot, your virtual assistant!", "You can call me ChatBot!", "I'm just a simple bot here to help!"]
+            }
+        }
+        
+        # Create vocabulary and process data
+        self.vocabulary = self.create_vocabulary()
+        self.intent_labels = list(self.intents.keys())
+        self.vocab_size = len(self.vocabulary)
+        self.num_classes = len(self.intent_labels)
+        
+        # Create and train model
+        self.model = NeuralNet(input_size=self.vocab_size, 
+                              hidden_size=64, 
+                              num_classes=self.num_classes)
+        self.train_model()
+        
+    def create_vocabulary(self):
+        """Create vocabulary from all patterns"""
+        vocab = set()
+        for intent_data in self.intents.values():
+            for pattern in intent_data["patterns"]:
+                words = self.tokenize(pattern)
+                vocab.update(words)
+        return sorted(list(vocab))
+    
+    def tokenize(self, text):
+        """Simple tokenization"""
+        # Convert to lowercase and remove punctuation
+        text = re.sub(r'[^\w\s]', '', text.lower())
+        return text.split()
+    
+    def text_to_bag_of_words(self, text):
+        """Convert text to bag of words representation"""
+        words = self.tokenize(text)
+        bag = np.zeros(self.vocab_size, dtype=np.float32)
+        
+        for word in words:
+            if word in self.vocabulary:
+                index = self.vocabulary.index(word)
+                bag[index] = 1.0
+        
+        return bag
+    
+    def prepare_training_data(self):
+        """Prepare training data"""
+        X = []
+        y = []
+        
+        for intent_idx, (intent_name, intent_data) in enumerate(self.intents.items()):
+            for pattern in intent_data["patterns"]:
+                bag = self.text_to_bag_of_words(pattern)
+                X.append(bag)
+                y.append(intent_idx)
+        
+        return np.array(X), np.array(y)
+    
+    def train_model(self):
+        """Train the neural network"""
+        print("Training the chatbot...")
+        
+        # Prepare data
+        X_train, y_train = self.prepare_training_data()
+        
+        # Convert to PyTorch tensors
+        X_train = torch.FloatTensor(X_train)
+        y_train = torch.LongTensor(y_train)
+        
+        # Loss and optimizer
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        
+        # Training loop
+        epochs = 1000
+        for epoch in range(epochs):
+            # Forward pass
+            outputs = self.model(X_train)
+            loss = criterion(outputs, y_train)
+            
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            if (epoch + 1) % 200 == 0:
+                print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}')
+        
+        print("Training completed!")
+    
+    def predict_intent(self, text):
+        """Predict intent for given text"""
+        bag = self.text_to_bag_of_words(text)
+        bag = torch.FloatTensor(bag).unsqueeze(0)  # Add batch dimension
+        
+        with torch.no_grad():
+            outputs = self.model(bag)
+            probabilities = torch.softmax(outputs, dim=1)
+            predicted_idx = torch.argmax(probabilities, dim=1).item()
+            confidence = probabilities[0][predicted_idx].item()
+        
+        predicted_intent = self.intent_labels[predicted_idx]
+        return predicted_intent, confidence
+    
+    def get_response(self, user_input):
+        """Get response for user input"""
+        intent, confidence = self.predict_intent(user_input)
+        
+        # Only respond if confidence is above threshold
+        if confidence > 0.5:
+            responses = self.intents[intent]["responses"]
+            return random.choice(responses)
+        else:
+            return "I'm not sure what you mean. Can you rephrase that?"
+    
+    def chat(self):
+        """Start interactive chat"""
+        print("=" * 50)
+        print("Mini Chatbot is ready!")
+        print("Type 'quit' to exit")
+        print("=" * 50)
+        
+        while True:
+            user_input = input("You: ").strip()
+            
+            if user_input.lower() == 'quit':
+                print("Bot: Goodbye! Thanks for chatting!")
+                break
+            
+            if user_input:
+                response = self.get_response(user_input)
+                print(f"Bot: {response}")
+            else:
+                print("Bot: Please say something!")
+
+def demo_predictions():
+    """Demonstrate the chatbot with sample inputs"""
+    print("Creating and training mini chatbot...")
+    bot = MiniChatbot()
+    
+    # Test samples
+    test_inputs = [
+        "hello there",
+        "what is your name",
+        "thank you very much",
+        "how is the weather",
+        "goodbye",
+        "I love programming",  # This should have low confidence
+    ]
+    
+    print("\n" + "="*50)
+    print("DEMO: Testing chatbot with sample inputs")
+    print("="*50)
+    
+    for test_input in test_inputs:
+        intent, confidence = bot.predict_intent(test_input)
+        response = bot.get_response(test_input)
+        print(f"Input: '{test_input}'")
+        print(f"Predicted Intent: {intent} (Confidence: {confidence:.3f})")
+        print(f"Response: {response}")
+        print("-" * 30)
+
+def main():
+    """Main function to run the chatbot"""
+    print("Mini Regression Chatbot")
+    print("This chatbot uses a simple neural network for intent classification")
+    
+    # Show demo first
+    demo_predictions()
+    
+    # Ask user if they want to interact
+    start_chat = input("\nWould you like to start interactive chat? (y/n): ")
+    
+    if start_chat.lower() == 'y':
+        bot = MiniChatbot()
+        bot.chat()
+    else:
+        print("Thanks for trying the demo!")
+
+if __name__ == "__main__":
+    main()'''
+
